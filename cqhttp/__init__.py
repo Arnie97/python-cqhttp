@@ -1,6 +1,7 @@
 import hmac
 from collections import defaultdict
 from functools import wraps
+from http.cookies import BaseCookie
 
 import requests
 from flask import Flask, request, abort, jsonify
@@ -55,6 +56,7 @@ class CQHttp:
         self._handlers = defaultdict(dict)
         self._server_app = Flask(__name__)
         self._server_app.route('/', methods=['POST'])(self._handle)
+        self._cookies = self._bkn = None
 
     @property
     def wsgi(self):
@@ -120,3 +122,38 @@ class CQHttp:
     def __getattr__(self, item):
         if self._api_root:
             return _api_client(self._api_root + '/' + item, self._access_token)
+
+    @property
+    def cookies(self) -> str:
+        if not self._cookies:
+            self._cookies = self.get_cookies()['cookies']
+        return self._cookies
+
+    @property
+    def bkn(self) -> str:
+        if not self._bkn:
+            skey = BaseCookie(self.cookies)['skey'].value
+            self._bkn = self._skey_to_bkn(skey)
+        return self._bkn
+
+    @staticmethod
+    def _skey_to_bkn(skey: str) -> str:
+        hash = 5381
+        int16_max = (1 << 31) - 1
+        for char in skey:
+            hash += (hash << 5) + ord(char)
+        return hash & int16_max
+
+    def get_group_notice(self, group_id: int, **kw) -> dict:
+        url = 'http://web.qun.qq.com/cgi-bin/announce/get_t_list'
+        data = dict(bkn=self.bkn, qid=group_id, ft=23, s=-1, n=10, ni=1, i=1)
+        data.update(**kw)
+        response = requests.post(url, data, headers=dict(Cookie=self.cookies))
+        return response.json()
+
+    def send_group_notice(self, group_id: int, title: str, text: str, **kw):
+        url = 'http://web.qun.qq.com/cgi-bin/announce/add_qun_notice'
+        data = dict(bkn=self.bkn, qid=group_id, title=title, text=text)
+        data.update(gsi=self.get_group_notice(group_id)['gsi'], **kw)
+        response = requests.post(url, data, headers=dict(Cookie=self.cookies))
+        return response.json()
