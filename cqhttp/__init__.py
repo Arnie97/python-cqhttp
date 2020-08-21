@@ -13,8 +13,14 @@ class Error(Exception):
         self.retcode = retcode
 
 
-def _api_client(url, access_token=None):
+def _api_client(targets, api_path, access_token=None):
+
     def do_call(**kwargs):
+        api_root = targets.get(kwargs.get('self_id', 0))
+        if not api_root:
+            raise Error(422)
+        url = api_root + '/' + api_path
+
         headers = {}
         if access_token:
             headers['Authorization'] = 'Token ' + access_token
@@ -52,7 +58,13 @@ def _deco_maker(type_):
 
 class CQHttp:
     def __init__(self, api_root=None, access_token=None, secret=None):
-        self._api_root = api_root.rstrip('/') if api_root else None
+        if isinstance(api_root, str):
+            self._api_root = {0: api_root.rstrip('/')}
+        elif api_root:
+            self._api_root = {k: v.rstrip('/') for k, v in api_root.items()}
+        else:
+            self._api_root = {}
+
         self._access_token = access_token
         self._secret = secret
         self._handlers = defaultdict(dict)
@@ -122,5 +134,4 @@ class CQHttp:
         return self.send_msg(**params)
 
     def __getattr__(self, item):
-        if self._api_root:
-            return _api_client(self._api_root + '/' + item, self._access_token)
+        return _api_client(self._api_root, item, self._access_token)
